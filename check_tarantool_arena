@@ -1,0 +1,159 @@
+#!/usr/bin/perl
+
+
+=head1 NAME
+
+check_tarantool_arena - check fullness of tarantool arena (Nagios plugin)
+
+=head1 SYNOPSIS
+
+    check_tarantool_arena -H <host> -P <port> -w 50 -c 80
+
+=head1 DESCRIPTION
+
+The script checks fullness of tarantool arena and alerts if it has value more
+than warning (B<< <-w> >>) or critical (B<< <-c> >>) levels.
+
+=head1 OPTIONS
+
+=over
+
+=item -H | --host <address>
+
+Hostname or hostaddress of tarantool (default value is 'B<127.0.0.1>').
+
+=item -P | --port <port>
+
+Tarantool port (default value is B<33013>).
+
+
+=item -c | --critical
+
+Critical threshold (default value is B<80%>).
+
+=item -w | --warning
+
+Warning threshold (default value is B<60%>).
+
+=back
+
+=head1 DEPENDS
+
+The plugin requires the following perl modules:
+
+=over
+
+=item Nagios::Plugin
+
+L<http://search.cpan.org/dist/Nagios-Plugin/>
+
+=item DR::Tarantool (>= 0.23)
+
+L<http://search.cpan.org/dist/DR-Tarantool/>
+
+=back
+
+
+=head1 VCS
+
+    https://github.com/unera/tarantool-nagios
+
+=head1 AUTHOR
+
+    Dmitry E. Oboukhov <unera@debian.org>
+
+=head1 LICENSE
+
+    This program is free software, you can redistribute it and/or
+    modify it under the terms of the Artistic License.
+
+=cut
+
+
+use warnings;
+use strict;
+
+use utf8;
+use open qw(:std :utf8);
+
+use Nagios::Plugin;
+use Nagios::Plugin::Getopt;
+use DR::Tarantool '0.23', 'tarantool';
+use POSIX;
+
+our $VERSION = '0.01';
+use constant USAGE =>
+    "Usage: $0 [ -c <critical> ] [ -w <warning> ] [ -H <host> ] [ -P <port> ]";
+
+POSIX::setlocale( &POSIX::LC_MESSAGES, "POSIX" );
+
+
+my $np = Nagios::Plugin->new(
+    usage   => USAGE,
+    version => $VERSION,
+);
+
+$np->add_arg(
+    spec    => 'host|H=s',
+    help    => '-H, --host=<hostname> - tarantool host',
+    default => '127.0.0.1',
+);
+
+$np->add_arg(
+    spec    => 'port|P=s',
+    help    => '-P, --port=<port> - tarantool port',
+    default => '33013',
+);
+
+$np->add_arg(
+    spec    => 'warning|w=s',
+    help    => '-w, --warning=INTEGER',
+    default => 60,
+);
+
+$np->add_arg(
+    spec    => 'critical|c=s',
+    help    => '-c, --critical=INTEGER',
+    default => 80,
+);
+
+$np->getopts;
+
+my $used = eval {
+    my $tnt = tarantool host => $np->opts->host, port => $np->opts->port;
+    my $stat = $tnt->call_lua(
+        'box.dostring' => ['return box.slab.arena_size, box.slab.arena_used'],
+        fields => [ { type => 'NUM' } ]
+    );
+
+    die "Can't fetch statistic from tarantool\n" unless $stat;
+    my $size = $stat->raw(0);
+    my $used = $stat->next->raw(0);
+
+    $used *= 100.0;
+    $used /= $size;
+    return $used;
+};
+$np->nagios_die($@) if $@;
+
+
+my $crit = $np->opts->critical;
+$crit =~ s/%//g;
+
+if ($used > $crit) {
+    $np->nagios_exit(CRITICAL, sprintf "Arena used more than %3.2f%% (%3.2f%%)",
+        $crit,
+        $used
+    );
+}
+
+my $warn = $np->opts->warning;
+$warn =~ s/%//g;
+if ($used > $warn) {
+    $np->nagios_exit(WARNING, sprintf "Arena used more than %3.2f%% (%3.2f%%)",
+        $warn,
+        $used
+    );
+}
+
+$np->nagios_exit(OK, sprintf "Arena used: %3.2f%%", $used);
