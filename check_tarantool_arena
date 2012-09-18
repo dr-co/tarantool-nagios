@@ -123,7 +123,7 @@ my $used = eval {
     my $tnt = tarantool host => $np->opts->host, port => $np->opts->port;
     my $stat = $tnt->call_lua(
         'box.dostring' => ['return box.slab.arena_size, box.slab.arena_used'],
-        fields => [ { type => 'NUM' } ]
+        fields => [ { type => 'NUM64' } ]
     );
 
     die "Can't fetch statistic from tarantool\n" unless $stat;
